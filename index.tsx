@@ -5,9 +5,17 @@ import * as Icons from 'lucide-react';
 
 // --- Constants & Configuration ---
 
-// Safe access for process.env in browser environments. 
-// For GitHub Pages, you might not have process.env, so we fallback to a global if set (for debugging).
-const GOOGLE_API_KEY = (typeof process !== 'undefined' ? process.env.API_KEY : undefined) || (window as any).GOOGLE_API_KEY;
+// Safe access for process.env
+const getEnvApiKey = () => {
+    try {
+        // @ts-ignore
+        return typeof process !== 'undefined' ? process.env?.API_KEY : undefined;
+    } catch {
+        return undefined;
+    }
+};
+
+const DEFAULT_ENV_KEY = getEnvApiKey() || (window as any).GOOGLE_API_KEY;
 
 type GroupKey = 'life' | 'body' | 'work';
 
@@ -693,6 +701,7 @@ export default function Index() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [rawLogs, setRawLogs] = useState<RawLog[]>([]);
+  const [userApiKey, setUserApiKey] = useState<string>(() => localStorage.getItem('lifeos_apikey') || '');
   
   // State: UI
   const [activeTab, setActiveTab] = useState<'chat' | 'dashboard' | 'settings'>('chat');
@@ -800,6 +809,7 @@ export default function Index() {
   useEffect(() => localStorage.setItem('lifeos_aiconfig', JSON.stringify(aiConfig)), [aiConfig]);
   useEffect(() => localStorage.setItem('lifeos_chatsettings', JSON.stringify(chatSettings)), [chatSettings]);
   useEffect(() => localStorage.setItem('lifeos_schemas', JSON.stringify(customSchemas)), [customSchemas]);
+  useEffect(() => localStorage.setItem('lifeos_apikey', userApiKey), [userApiKey]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -847,11 +857,14 @@ export default function Index() {
       return filtered;
   };
 
+  const getActiveKey = () => userApiKey || DEFAULT_ENV_KEY;
+
   const chatWithGemini = async (history: ChatMessage[], newMsg: string, imageBase64: string | undefined, signal: AbortSignal, regenerate = false) => {
-    if (!GOOGLE_API_KEY) {
-        return "Error: No API Key found. Please set process.env.API_KEY or window.GOOGLE_API_KEY.";
+    const key = getActiveKey();
+    if (!key) {
+        return "Error: No API Key found. Please set it in Settings.";
     }
-    const ai = new GoogleGenAI({ apiKey: GOOGLE_API_KEY });
+    const ai = new GoogleGenAI({ apiKey: key });
     
     // Construct prompt for history
     // Note: Multimodal history is complex. For simplicity, we treat history as text-only logs, 
@@ -896,13 +909,14 @@ export default function Index() {
     } catch (e: any) {
         if (e.message === 'Aborted') return ""; // Silent return
         console.error(e);
-        return "Thinking process interrupted or failed.";
+        return "Thinking process interrupted or failed. Check your API Key.";
     }
   };
 
   const organizeInput = async (text: string, dateStr: string, imageBase64?: string): Promise<any[]> => {
-    if (!GOOGLE_API_KEY) return [];
-    const ai = new GoogleGenAI({ apiKey: GOOGLE_API_KEY });
+    const key = getActiveKey();
+    if (!key) return [];
+    const ai = new GoogleGenAI({ apiKey: key });
     
     // Generate valid JSON schema parts based on customSchemas
     const prompt = `
@@ -997,6 +1011,12 @@ User Input: "${text}"
   const handleSendMessage = async () => {
     if (!inputText.trim() && !selectedFile) return;
     if (isProcessing) return;
+
+    if (!getActiveKey()) {
+        alert("Please set your API Key in Settings first.");
+        setActiveTab('settings');
+        return;
+    }
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -1858,6 +1878,33 @@ User Input: "${text}"
               {activeTab === 'settings' && (
                   <div className="h-full overflow-y-auto p-4 md:p-8 custom-scrollbar max-w-5xl mx-auto">
                       <div className="space-y-12 pb-20">
+                           {/* API Key Section */}
+                           <div className="border border-yellow-700/50 bg-yellow-900/10 p-6 rounded-xl space-y-4">
+                               <div className="flex items-center gap-3">
+                                   <div className="p-2 bg-yellow-600/20 text-yellow-500 rounded-lg">
+                                       <Icons.Key className="w-5 h-5" />
+                                   </div>
+                                   <div>
+                                       <h3 className="text-xl font-bold text-yellow-500">Google Gemini API Key</h3>
+                                       <p className="text-xs text-yellow-500/60">Required for AI features to work.</p>
+                                   </div>
+                               </div>
+                               <div>
+                                   <input 
+                                       type="password" 
+                                       value={userApiKey}
+                                       onChange={(e) => setUserApiKey(e.target.value)}
+                                       placeholder={DEFAULT_ENV_KEY ? "Loaded from Environment (Hidden)" : "Paste your API Key here (starts with AIza...)"}
+                                       className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-sm focus:border-yellow-500 outline-none font-mono"
+                                   />
+                                   <p className="text-[10px] text-gray-500 mt-2 flex justify-between">
+                                       <span>Stored locally in your browser.</span>
+                                       {!userApiKey && !DEFAULT_ENV_KEY && <span className="text-red-400 font-bold">MISSING KEY</span>}
+                                       {DEFAULT_ENV_KEY && <span className="text-green-500">System Key Active</span>}
+                                   </p>
+                               </div>
+                           </div>
+
                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                 <div className="space-y-4">
                                     <h3 className="text-xl font-bold flex items-center gap-2 text-blue-400">
